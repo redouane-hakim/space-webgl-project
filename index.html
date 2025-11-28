@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NASA Solar System - Three.js</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: black;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    #ui button {
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: none;
+      background: rgba(40, 40, 40, 0.85);
+      color: #f5f5f5;
+      cursor: pointer;
+      font-size: 12px;
+      text-align: left;
+      backdrop-filter: blur(4px);
+      transition: background 0.15s;
+    }
+
+    #ui button:hover {
+      background: rgba(80, 80, 80, 0.95);
+    }
+
+    #ui button:active {
+      transform: translateY(1px);
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- Simple UI buttons for camera modes -->
+  <div id="ui">
+    <button id="btnSolar">Solar System View</button>
+    <button id="btnShip">Spaceship 3D View</button>
+    <button id="btnMercury">View Mercury</button>
+    <button id="btnVenus">View Venus</button>
+    <button id="btnEarth">View Earth</button>
+    <button id="btnMars">View Mars</button>
+    <button id="btnJupiter">View Jupiter</button>
+    <button id="btnSaturn">View Saturn</button>
+    <button id="btnUranus">View Uranus</button>
+    <button id="btnNeptune">View Neptune</button>
+  </div>
+
+  <script type="module">
+    // ============================================================
+    // Imports from CDN (Three.js core + OrbitControls + GLTFLoader)
+    // ============================================================
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+
+
+    // ============================================================
+    // Configuration objects for planets and moons
+    // (Uses your EXACT filenames)
+    // ============================================================
+    
+
+    
+    
+    
+    const PLANET_CONFIGS = {
+      Mercury: {
+        model: 'Mercury_1_4878.glb',
+        orbitRadius: 40,
+        orbitSpeed: 1.2,
+        rotationSpeed: 1.0,
+        scale: 0.004
+      },
+      Venus: {
+        model: 'Venus_1_12103.glb',
+        orbitRadius: 60,
+        orbitSpeed: 0.9,
+        rotationSpeed: 0.8,
+        scale: 0.005
+      },
+      Earth: {
+        model: 'Earth_1_12756.glb',
+        orbitRadius: 80,
+        orbitSpeed: 0.8,
+        rotationSpeed: 1.3,
+        scale: 0.005
+      },
+      Mars: {
+        model: 'Mars_1_6792.glb',
+        orbitRadius: 100,
+        orbitSpeed: 0.7,
+        rotationSpeed: 1.2,
+        scale: 0.004
+      },
+      Jupiter: {
+        model: 'Jupiter_1_142984.glb',
+        orbitRadius: 140,
+        orbitSpeed: 0.5,
+        rotationSpeed: 1.5,
+        scale: 0.01
+      },
+      Saturn: {
+        model: 'Saturn_1_120536.glb',
+        orbitRadius: 180,
+        orbitSpeed: 0.4,
+        rotationSpeed: 1.3,
+        scale: 0.009
+      },
+      Uranus: {
+        model: 'Uranus_1_51118.glb',
+        orbitRadius: 220,
+        orbitSpeed: 0.3,
+        rotationSpeed: 1.1,
+        scale: 0.009
+      },
+      Neptune: {
+        model: 'Neptune_1_49528.glb',
+        orbitRadius: 260,
+        orbitSpeed: 0.25,
+        rotationSpeed: 1.1,
+        scale: 0.009
+      }
+    };
+
+    const MOON_CONFIGS = {
+      Earth: [
+        { model: 'Moon_1_3474.glb', orbitRadius: 10, orbitSpeed: 2.0, scale: 0.0025 }
+      ],
+      Jupiter: [
+        { model: 'Ganymede_1_5268.glb', orbitRadius: 18, orbitSpeed: 1.0, scale: 0.003 }
+      ],
+      Saturn: [
+        { model: 'Titan_1_5150.glb', orbitRadius: 15, orbitSpeed: 1.2, scale: 0.0028 }
+      ]
+    };
+
+    // ============================================================
+    // Global variables - scene, camera, renderer, controls
+    // ============================================================
+    let scene, camera, renderer, controls;
+    let solarSystem;                     // Root group for the whole solar system
+    let sunMesh;                         // Emissive sphere representing the Sun
+    const planetData = {};              // Data structure to hold planet-related objects
+    const moonData = [];                // List of all moon orbit groups for animation
+
+    let spaceship = null;               // NASA spaceship (Space Shuttle)
+    const shipVelocity = new THREE.Vector3();
+    const shipKeys = {};                // Keyboard state
+    const maxDistanceFromSun = 1500;
+
+    // Camera mode state
+    let currentMode = 'solar';          // 'solar' | 'planet' | 'ship'
+    let currentPlanetName = null;       // Active planet in planet-view mode
+    let planetCameraOffset = new THREE.Vector3(0, 20, 40);
+    const shipCameraOffset = new THREE.Vector3(0, 10, 30);
+
+    // Camera interpolation (smooth transitions)
+    const cameraLerp = {
+      active: false,
+      duration: 2.0,
+      t: 0,
+      startPos: new THREE.Vector3(),
+      endPos: new THREE.Vector3(),
+      startTarget: new THREE.Vector3(),
+      endTarget: new THREE.Vector3()
+    };
+
+    const clock = new THREE.Clock();
+
+    // ============================================================
+    // Initialization
+    // ============================================================
+    init();
+    animate();
+
+    function init() {
+      // -------------------------
+      // Basic Scene / Camera
+      // -------------------------
+      scene = new THREE.Scene();
+
+      camera = new THREE.PerspectiveCamera(
+        60,                            // FOV
+        window.innerWidth / window.innerHeight,
+        0.1,
+        5000
+      );
+      camera.position.set(0, 200, 400);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      document.body.appendChild(renderer.domElement);
+
+      // -------------------------
+      // Orbit controls for solar/planet modes
+      // -------------------------
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.target.set(0, 0, 0);
+      controls.minDistance = 20;
+      controls.maxDistance = 2000;
+
+      // -------------------------
+      // ------------------------------------------------------------
+    // REAL PHYSICALLY-BASED LIGHTING AND RENDERER SETTINGS
+    // ------------------------------------------------------------
+    renderer.physicallyCorrectLights = true;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.6;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    // Sun =  LIGHT SOURCE (ambient, point)
+    const sunLight = new THREE.PointLight(0xffffff, 8000, 0, 2);
+    sunLight.position.set(0, 0, 0);
+    scene.add(sunLight);
+    const planetDimLight = new THREE.AmbientLight(0xffffff, 0.03);
+    scene.add(planetDimLight);
+    const moonAmbient = new THREE.AmbientLight(0xffffff, 0.08);
+    scene.add(moonAmbient);
+      // -------------------------
+      // Starfield background (Point starfield)
+      // -------------------------
+      createStarfield();
+
+      // -------------------------
+// Solar system root group
+// -------------------------
+solarSystem = new THREE.Group();
+scene.add(solarSystem);
+
+// -------------------------------------------------------
+// Load Sun GLB ONLY to extract its texture/material
+// -------------------------------------------------------
+    const sunLoader = new GLTFLoader();
+sunLoader.load(
+  "sun.glb",
+  (gltf) => {
+    let baseMap = null;
+    let emissiveMap = null;
+
+    gltf.scene.traverse((obj) => {
+      if (obj.isMesh && obj.material) {
+        const mat = obj.material;
+
+        if (mat.map) {
+          baseMap = mat.map;
+          baseMap.colorSpace = THREE.SRGBColorSpace;
+        }
+        if (mat.emissiveMap) {
+          emissiveMap = mat.emissiveMap;
+          emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        }
+      }
+    });
+
+    // Build procedural glowing Sun sphere using the GLB’s textures
+    const sunGeometry = new THREE.SphereGeometry(20, 64, 64);
+
+    const sunMaterial = new THREE.MeshStandardMaterial({
+    map: baseMap,
+    emissive: 0xffaa33,
+    emissiveMap: emissiveMap,
+    emissiveIntensity: 3.5,    // brighter glow but preserves detail
+    roughness: 0.9,
+    metalness: 0.0,
+    toneMapped: false           // THIS makes the texture fully visible
+    });
+
+    // Boost texture clarity
+    if (baseMap) {
+    baseMap.colorSpace = THREE.SRGBColorSpace;
+    baseMap.encoding = THREE.sRGBEncoding;
+    baseMap.needsUpdate = true;
+    }
+
+    if (emissiveMap) {
+    emissiveMap.colorSpace = THREE.SRGBColorSpace;
+    emissiveMap.encoding = THREE.sRGBEncoding;
+    emissiveMap.needsUpdate = true;
+    }
+
+    sunMesh = new THREE.Mesh(sunGeometry, sunMaterial);
+
+   
+    
+
+    // Sun light
+    const sunLight = new THREE.PointLight(0xffffff,3.0, 0, 2);
+    sunMesh.add(sunLight)
+
+    // Subtle bounce-light so planet night sides are slightly visible
+    const backlight = new THREE.AmbientLight(0xffffff, 0.06);
+    scene.add(backlight);
+
+    sunMesh.position.set(0, 0, 0);
+    solarSystem.add(sunMesh);
+  },
+  undefined,
+  (err) => console.error("Failed to load sun.glb:", err)
+);
+
+
+      // -------------------------
+      // Load all GLB models (planets, moons, spaceship)
+      // -------------------------
+      const loader = new GLTFLoader();
+
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('three/examples/jsm/libs/draco/'); 
+      dracoLoader.setDecoderConfig({ type: 'js' });
+
+            // attach DRACO to GLTFLoader
+      loader.setDRACOLoader(dracoLoader);
+
+      // Collect unique model filenames
+      const modelFilesSet = new Set();
+      // Planets
+      for (const cfg of Object.values(PLANET_CONFIGS)) {
+        modelFilesSet.add(cfg.model);
+      }
+      // Moons
+      for (const moonList of Object.values(MOON_CONFIGS)) {
+        for (const moonConfig of moonList) {
+          modelFilesSet.add(moonConfig.model);
+        }
+      }
+      // Spaceship
+      modelFilesSet.add('Space_Shuttle_(D).glb');
+
+      const modelFiles = Array.from(modelFilesSet);
+      const loadedModels = {};
+
+      const loadPromises = modelFiles.map((file) => {
+        return new Promise((resolve, reject) => {
+          loader.load(
+            file,
+            (gltf) => {
+              loadedModels[file] = gltf;
+              resolve();
+            },
+            undefined,
+            (error) => {
+              console.error('Error loading', file, error);
+              reject(error);
+            }
+          );
+        });
+      });
+
+      Promise.all(loadPromises)
+        .then(() => {
+          // After everything is loaded, build planets, moons, and spaceship
+          buildPlanets(loadedModels);
+          buildMoons(loadedModels);
+          buildSpaceship(loadedModels['Space_Shuttle_(D).glb']);
+
+          // Wire up UI buttons
+          setupUI();
+        })
+        .catch((err) => {
+          console.error('Error loading models:', err);
+        });
+
+      // -------------------------
+      // Window resize handling
+      // -------------------------
+      window.addEventListener('resize', onWindowResize);
+
+      // -------------------------
+      // Keyboard controls for spaceship
+      // -------------------------
+      window.addEventListener('keydown', (e) => {
+        shipKeys[e.code] = true;
+      });
+      window.addEventListener('keyup', (e) => {
+        shipKeys[e.code] = false;
+      });
+    }
+
+    // ============================================================
+    // Starfield creation (simple point cloud)
+    // ============================================================
+    function createStarfield() {
+      const starGeometry = new THREE.BufferGeometry();
+      const starCount = 2000;
+      const positions = new Float32Array(starCount * 3);
+
+      // Randomly distribute stars in a large cube around the origin
+      const spread = 2000;
+      for (let i = 0; i < starCount; i++) {
+        const i3 = i * 3;
+        positions[i3 + 0] = (Math.random() - 0.5) * spread * 2;
+        positions[i3 + 1] = (Math.random() - 0.5) * spread;
+        positions[i3 + 2] = (Math.random() - 0.5) * spread * 2;
+      }
+
+      starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+      const starMaterial = new THREE.PointsMaterial({
+        size: 1.4,
+        sizeAttenuation: true,
+        color: 0xffffff
+      });
+
+      const stars = new THREE.Points(starGeometry, starMaterial);
+      scene.add(stars);
+    }
+
+    // ============================================================
+    // Build Planets (single load each, GLTF cloned as needed)
+    // ============================================================
+    function buildPlanets(loadedModels) {
+      for (const [name, config] of Object.entries(PLANET_CONFIGS)) {
+        const gltf = loadedModels[config.model];
+        if (!gltf) {
+          console.warn('Missing GLTF for planet:', name, config.model);
+          continue;
+        }
+
+        // Use GLTF scene and scale it down
+        const planetScene = gltf.scene;
+        planetScene.traverse((obj) => {
+          if (obj.isMesh) {
+            obj.castShadow = true;
+            obj.receiveShadow = true;
+          }
+        });
+
+        // Convert old/non-PBR materials to MeshStandardMaterial for real lighting
+        planetScene.traverse((o) => {
+        if (o.isMesh) {
+            const mat = o.material;
+            if (!(mat instanceof THREE.MeshStandardMaterial)) {
+            const newMat = new THREE.MeshStandardMaterial({
+                map: mat.map || null,
+                normalMap: mat.normalMap || null,
+                roughness: name === "Mercury" || name === "Venus" ? 0.55 : 0.95,
+                metalness: 0.0,
+                toneMapped: true
+            });
+
+            if (newMat.map) {
+                newMat.map.colorSpace = THREE.SRGBColorSpace;
+                newMat.map.encoding = THREE.sRGBEncoding;
+                newMat.map.needsUpdate = true;
+            }
+
+            o.material = newMat;
+            }
+        }
+        });
+
+        planetScene.scale.setScalar(config.scale);
+
+        // Create a group to hold this planet system
+        const planetGroup = new THREE.Group();
+
+        // Orbit pivot at the Sun position (0,0,0).
+        // Rotating this pivot will cause the planet to orbit.
+        const orbitPivot = new THREE.Object3D();
+        orbitPivot.position.set(0, 0, 0);
+        planetGroup.add(orbitPivot);
+
+        // Place the planet on the +X side at the correct orbit radius
+        const planetMesh = planetScene;
+        planetMesh.position.set(config.orbitRadius, 0, 0);
+        orbitPivot.add(planetMesh);
+
+        // Add the whole group to the solar system
+        solarSystem.add(planetGroup);
+
+        // Saturn: ensure rings exist if GLB doesn't have them
+        if (name === 'Saturn') {
+          ensureSaturnRings(planetMesh, config);
+        }
+
+        // Uranus & Neptune: create simple rings
+        if (name === 'Uranus') {
+          addPlanetRing(planetMesh, config, 1.4, 2.2, 20);
+        }
+        if (name === 'Neptune') {
+          addPlanetRing(planetMesh, config, 1.3, 2.0, 35);
+        }
+
+        // Store data for animation and camera targeting
+        planetData[name] = {
+          name,
+          config,
+          planetGroup,
+          orbitPivot,
+          planetMesh,
+          moons: [] // filled later
+        };
+      }
+    }
+
+    // ============================================================
+    // Create moons by cloning moon GLTFs once per moon config
+    // ============================================================
+    function buildMoons(loadedModels) {
+      for (const [planetName, moonConfigs] of Object.entries(MOON_CONFIGS)) {
+        const planetEntry = planetData[planetName];
+        if (!planetEntry) continue;
+
+        const planetMesh = planetEntry.planetMesh;
+
+        for (const moonCfg of moonConfigs) {
+          const gltf = loadedModels[moonCfg.model];
+          if (!gltf) {
+            console.warn('Missing GLTF for moon:', moonCfg.model);
+            continue;
+          }
+
+          // Clone moon scene (we ensure each moon model is loaded only once)
+          const moonScene = gltf.scene.clone(true);
+          moonScene.traverse((obj) => {
+            if (obj.isMesh) {
+              obj.castShadow = true;
+              obj.receiveShadow = true;
+            }
+          });
+          moonScene.scale.setScalar(moonCfg.scale);
+
+          // Moon orbit group attached to the planet, so it orbits the planet
+          const moonOrbitGroup = new THREE.Object3D();
+          moonOrbitGroup.position.set(0, 0, 0);
+          moonOrbitGroup.rotation.set(0, 0, 0);
+
+          // Place the moon to +X relative to the planet
+          moonScene.position.set(moonCfg.orbitRadius, 0, 0);
+          moonOrbitGroup.add(moonScene);
+
+          // Add moon orbit group to the planet mesh
+          planetEntry.planetGroup.add(moonOrbitGroup);
+
+          // Track for animation
+          const moonEntry = {
+            parentPlanet: planetName,
+            orbitGroup: moonOrbitGroup,
+            orbitSpeed: moonCfg.orbitSpeed
+          };
+          planetEntry.moons.push(moonEntry);
+          moonData.push(moonEntry);
+        }
+      }
+    }
+
+    // ============================================================
+    // Ensure Saturn has rings (either use GLB's or generate simple ring)
+    // ============================================================
+    function ensureSaturnRings(planetMesh, config) {
+      let hasRings = false;
+      planetMesh.traverse((obj) => {
+        if (obj.isMesh && obj.name.toLowerCase().includes('ring')) {
+          hasRings = true;
+        }
+      });
+
+      if (hasRings) return;
+
+      // Generate a simple ring if GLB has no ring geometry
+      addPlanetRing(planetMesh, config, 1.8, 3.0, 0);
+    }
+
+    // ============================================================
+    // Add a ring to a planet (used for Saturn, Uranus, Neptune)
+    // innerFactor & outerFactor are multipliers of an approximate planet radius
+    // tiltDeg: ring tilt in degrees
+    // ============================================================
+    function addPlanetRing(planetMesh, config, innerFactor, outerFactor, tiltDeg) {
+      // Approximate planet radius using scale and a base of 1 (GLTF is likely in actual km, but
+      // we keep this simple). These factors are relative eye-candy.
+      const baseRadius = 8 * config.scale; // arbitrary small radius
+      const innerRadius = baseRadius * innerFactor * 10;
+      const outerRadius = baseRadius * outerFactor * 10;
+
+      const ringGeo = new THREE.RingGeometry(innerRadius, outerRadius, 64);
+      const ringMat = new THREE.MeshPhongMaterial({
+        color: 0xaaaaaa,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.6
+      });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.rotation.x = Math.PI / 2;
+      ringMesh.rotation.z = THREE.MathUtils.degToRad(tiltDeg);
+      ringMesh.position.set(0, 0, 0);
+
+      planetMesh.add(ringMesh);
+    }
+
+    // ============================================================
+    // Build spaceship (Space Shuttle (D).glb)
+    // ============================================================
+    function buildSpaceship(gltf) {
+      if (!gltf) {
+        console.warn('Missing GLTF for spaceship');
+        return;
+      }
+
+      spaceship = gltf.scene;
+      spaceship.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+        }
+      });
+      // Scale spaceship to a reasonable size
+      spaceship.scale.setScalar(0.002);
+
+       spaceship.rotation.set(0, 0, 0);
+
+    // Most GLB space shuttles face +Z → rotate to match Three.js forward (-Z)
+
+
+    
+
+    // START POSITION
+    spaceship.position.set(0, 5, 70);
+    spaceship.updateMatrixWorld(true);
+
+    scene.add(spaceship);
+    }
+
+    // ============================================================
+    // UI Buttons and Camera Mode Switching
+    // ============================================================
+    function setupUI() {
+      document.getElementById('btnSolar').addEventListener('click', () => {
+        setSolarSystemView();
+      });
+
+      document.getElementById('btnShip').addEventListener('click', () => {
+        setSpaceshipView();
+      });
+
+      document.getElementById('btnMercury').addEventListener('click', () => {
+        setPlanetView('Mercury');
+      });
+      document.getElementById('btnVenus').addEventListener('click', () => {
+        setPlanetView('Venus');
+      });
+      document.getElementById('btnEarth').addEventListener('click', () => {
+        setPlanetView('Earth');
+      });
+      document.getElementById('btnMars').addEventListener('click', () => {
+        setPlanetView('Mars');
+      });
+      document.getElementById('btnJupiter').addEventListener('click', () => {
+        setPlanetView('Jupiter');
+      });
+      document.getElementById('btnSaturn').addEventListener('click', () => {
+        setPlanetView('Saturn');
+      });
+      document.getElementById('btnUranus').addEventListener('click', () => {
+        setPlanetView('Uranus');
+      });
+      document.getElementById('btnNeptune').addEventListener('click', () => {
+        setPlanetView('Neptune');
+      });
+    }
+
+    // ============================================================
+    // Camera view helpers
+    // ============================================================
+    function startCameraTransition(endPos, endTarget) {
+      cameraLerp.active = true;
+      cameraLerp.t = 0;
+      cameraLerp.startPos.copy(camera.position);
+      cameraLerp.endPos.copy(endPos);
+      cameraLerp.startTarget.copy(controls.target);
+      cameraLerp.endTarget.copy(endTarget);
+    }
+
+    function setSolarSystemView() {
+      currentMode = 'solar';
+      currentPlanetName = null;
+      controls.enabled = true;
+
+      const endTarget = new THREE.Vector3(0, 0, 0);
+      const endPos = new THREE.Vector3(0, 200, 400);
+
+      startCameraTransition(endPos, endTarget);
+    }
+
+    function setPlanetView(planetName) {
+      const planetEntry = planetData[planetName];
+      if (!planetEntry) return;
+
+      currentMode = 'planet';
+      currentPlanetName = planetName;
+      controls.enabled = true;
+
+      // Get the planet position in world space
+    const planetWorldPos = new THREE.Vector3();
+    planetEntry.planetMesh.getWorldPosition(planetWorldPos);
+
+    // Compute vector from Sun → Planet (guaranteed “safe angle”)
+    const safeDirection = planetWorldPos.clone().normalize();
+
+    // Planet zoom distance (bigger planets need bigger distance)
+    const zoomDistance = 20; // you can tweak this (15–30)
+
+    // Calculate final camera position
+    const endPos = planetWorldPos.clone().addScaledVector(safeDirection, zoomDistance);
+
+    // ALWAYS look directly at the planet
+    const endTarget = planetWorldPos.clone();
+
+    // Save offset so camera follows during orbit
+    planetCameraOffset.copy(endPos.clone().sub(planetWorldPos));
+
+    startCameraTransition(endPos, endTarget);
+    }
+
+    function setSpaceshipView() {
+      if (!spaceship) return;
+
+      currentMode = 'ship';
+      currentPlanetName = null;
+      controls.enabled = false;
+
+      // Place camera behind and above the ship initially
+      const offsetWorld = shipCameraOffset.clone().applyQuaternion(spaceship.quaternion);
+      const camPos = spaceship.position.clone().add(offsetWorld);
+      camera.position.copy(camPos);
+      camera.lookAt(spaceship.position);
+    }
+
+    // ============================================================
+    // Window resize handler
+    // ============================================================
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // ============================================================
+    // Animation loop
+    // ============================================================
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(clock.getDelta(), 0.033);
+
+      // Update planet orbits and self-rotations
+      updatePlanets(dt);
+
+      // Update moon orbits
+      updateMoons(dt);
+
+      // Update spaceship movement
+      updateSpaceship(dt);
+
+      // Update camera chase / follow behavior
+      updateCamera(dt);
+
+      // Update OrbitControls in solar/planet mode
+      if (currentMode === 'solar' || currentMode === 'planet') {
+        controls.update();
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // ============================================================
+    // Planet updates (orbit + rotation)
+    // ============================================================
+    function updatePlanets(dt) {
+      for (const planetEntry of Object.values(planetData)) {
+        const { config, orbitPivot, planetMesh } = planetEntry;
+
+        // Orbit around the Sun by rotating the orbit pivot
+        orbitPivot.rotation.y += config.orbitSpeed * dt * 0.2;
+
+        // Self-rotation around its own axis
+        planetMesh.rotation.y += config.rotationSpeed * dt * 0.5;
+      }
+    }
+
+    // ============================================================
+    // Moon updates
+    // ============================================================
+    function updateMoons(dt) {
+      for (const moonEntry of moonData) {
+        moonEntry.orbitGroup.rotation.y += moonEntry.orbitSpeed * dt*0.1;
+      }
+    }
+
+    // ============================================================
+    // Spaceship movement & controls
+    // ============================================================
+    function updateSpaceship(dt) {
+      if (!spaceship) return;
+
+      // Keyboard controls only affect ship when in ship mode
+      if (currentMode === 'ship') {
+        const turnSpeed = THREE.MathUtils.degToRad(60);
+        const accel = 80;
+
+        // Forward vector in world space
+        const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(spaceship.quaternion);
+
+        // MOVE FORWARD / BACKWARD
+        if (shipKeys['KeyW']) {
+            shipVelocity.addScaledVector(forward, accel * dt);
+        }
+        if (shipKeys['KeyS']) {
+            shipVelocity.addScaledVector(forward, -accel * dt);
+        }
+
+        // TURN (Y-axis ONLY — racing game style)
+        if (shipKeys['KeyA']) {
+            spaceship.rotation.y += turnSpeed * dt;
+
+            // slight bank for effect
+            spaceship.rotation.z = THREE.MathUtils.lerp(spaceship.rotation.z, 0.25, 0.15);
+            spaceship.rotation.x = 0;
+            spaceship.rotation.z *= 0.9;  // keep small banking only
+        }
+        else if (shipKeys['KeyD']) {
+            spaceship.rotation.y -= turnSpeed * dt;
+
+            // slight bank right
+            spaceship.rotation.z = THREE.MathUtils.lerp(spaceship.rotation.z, -0.25, 0.15);
+            spaceship.rotation.x = 0;
+            spaceship.rotation.z *= 0.9;  // keep small banking only
+        }
+        else {
+            // auto-stabilize bank angle
+            spaceship.rotation.z = THREE.MathUtils.lerp(spaceship.rotation.z, 0, 0.1);
+            spaceship.rotation.x = 0;
+            spaceship.rotation.z *= 0.9;  // keep small banking only
+        }
+      }
+
+      // Apply velocity to position
+      spaceship.position.addScaledVector(shipVelocity, dt);
+
+      // Basic damping for stability
+      shipVelocity.multiplyScalar(0.99);
+
+      // Clamp ship distance from Sun
+      const distanceFromSun = spaceship.position.length();
+      if (distanceFromSun > maxDistanceFromSun) {
+        // Clamp position to allowed radius
+        spaceship.position.setLength(maxDistanceFromSun);
+        // Damp velocity heavily when clamped
+        shipVelocity.multiplyScalar(0.2);
+      }
+    }
+
+    // ============================================================
+    // Camera update (solar, planet, ship modes)
+    // ============================================================
+    function updateCamera(dt) {
+      // Smooth camera transition if active
+      if (cameraLerp.active) {
+        cameraLerp.t += dt;
+        let alpha = cameraLerp.t / cameraLerp.duration;
+        if (alpha >= 1.0) {
+          alpha = 1.0;
+          cameraLerp.active = false;
+        }
+
+        camera.position.lerpVectors(cameraLerp.startPos, cameraLerp.endPos, alpha);
+        controls.target.lerpVectors(cameraLerp.startTarget, cameraLerp.endTarget, alpha);
+      }
+
+      // In planet mode, keep the camera following the planet along its orbit
+      if (currentMode === 'planet' && currentPlanetName && !cameraLerp.active) {
+        const planetEntry = planetData[currentPlanetName];
+        if (planetEntry) {
+          const planetWorldPos = new THREE.Vector3();
+          planetEntry.planetMesh.getWorldPosition(planetWorldPos);
+
+          // Desired camera position = planet position + offset
+          const desiredPos = planetWorldPos.clone().add(planetCameraOffset);
+          camera.position.lerp(desiredPos, 0.1);
+          controls.target.lerp(planetWorldPos, 0.1);
+        }
+      }
+
+      // In ship mode, chase camera behind the ship
+      if (currentMode === 'ship' && spaceship) {
+            // Racing-style camera offset (behind and above)
+        const localOffset = new THREE.Vector3(-12, 4, 0);  
+        const worldOffset = localOffset.applyQuaternion(spaceship.quaternion);
+
+        const desiredPos = spaceship.position.clone().add(worldOffset);
+        camera.position.lerp(desiredPos, 0.3);
+
+        // Look ahead along +X (ship forward)
+        const lookAhead = new THREE.Vector3(40, 0, 0).applyQuaternion(spaceship.quaternion);
+        camera.lookAt(spaceship.position.clone().add(lookAhead));
+      }
+    }
+  </script>
+</body>
+</html>

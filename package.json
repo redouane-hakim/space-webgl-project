@@ -1,0 +1,19 @@
+{
+  "name": "solar-system",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@tweenjs/tween.js": "^25.0.0",
+    "gltf-loader": "^1.0.0",
+    "three": "^0.181.2",
+    "three-stdlib": "^2.36.1"
+  },
+  "devDependencies": {
+    "vite": "^7.2.4"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
+}
